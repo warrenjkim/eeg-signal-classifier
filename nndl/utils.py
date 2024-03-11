@@ -242,7 +242,7 @@ def objective(trial,
     ps_min = 2
     ps_max = 5
     offset = 3
-    depths = [25, 50, 100] #, 150, 200] # initial out_channels
+    depths = [25, 50, 100, 150, 200] # initial out_channels
     scale_min = 1
     scale_max = 4
     hidden_dimss = [16, 32, 64, 128, 256]
