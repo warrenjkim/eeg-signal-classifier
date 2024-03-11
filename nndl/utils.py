@@ -243,8 +243,8 @@ def objective(trial,
     ps_max = 5
     offset = 3
     depths = [25, 50, 100, 150, 200] # initial out_channels
-    scale_min = 1
-    scale_max = 4
+    scale_min = 2
+    scale_max = 5
     hidden_dimss = [16, 32, 64, 128, 256]
 
     # model hyperparameters
