@@ -15,8 +15,7 @@ class CNN(nn.Module):
                  pool_kernel,
                  time_bins=400,
                  channels=22,
-                 depth=25,
-                 scale=2):
+                 depth=25):
         super(CNN, self).__init__()
 
         self.magic_number = time_bins + kernel3 - 1
@@ -34,10 +33,10 @@ class CNN(nn.Module):
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(in_channels=depth,
-                      out_channels=depth * scale,
+                      out_channels=depth * 2,
                       kernel_size=kernel2),
             nn.ELU(),
-            nn.BatchNorm2d(depth * scale),
+            nn.BatchNorm2d(depth * 2),
             nn.MaxPool2d(kernel_size=(1, pool_kernel)),
             nn.Dropout(dropout)
         )
@@ -46,11 +45,11 @@ class CNN(nn.Module):
         self.L_pool = (self.L_pool - pool_kernel) // pool_kernel + 1
 
         self.conv3 = nn.Sequential(
-            nn.Conv1d(in_channels=depth * scale,
-                      out_channels=depth * scale**2,
+            nn.Conv1d(in_channels=depth * 2,
+                      out_channels=depth * 4,
                       kernel_size=kernel3),
             nn.ELU(),
-            nn.BatchNorm1d(depth * scale**2),
+            nn.BatchNorm1d(depth * 4),
             nn.MaxPool1d(kernel_size=pool_kernel),
             nn.Dropout(dropout)
         )
@@ -59,7 +58,7 @@ class CNN(nn.Module):
         self.L_pool = (self.L_pool - pool_kernel) // pool_kernel + 1
 
         self.conv4 = nn.Sequential(
-            nn.Conv1d(in_channels=depth * scale**2,
+            nn.Conv1d(in_channels=depth * 4,
                       out_channels=self.magic_number,
                       kernel_size=kernel4),
             nn.ELU(),

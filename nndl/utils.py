@@ -24,7 +24,7 @@ def train_model(model,
                 test_loader=None,
                 num_epochs=100,
                 learning=False,
-                device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+                device=torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'),
                 trial=None):
     # we return these
     train_accuracies = []
@@ -90,6 +90,8 @@ def train_model(model,
         val_acc = val_correct_count / val_count
         val_accuracies.append(val_acc.item())
         scheduler.step(val_loss)
+        if cosine:
+            current_lr = scheduler.get_last_lr()[0]
         # ======================================================================
         # END OF VALIDATION
         # ======================================================================
@@ -130,7 +132,9 @@ def train_model(model,
 # ==============================================================================
 # START OF test_model()
 # ==============================================================================
-def test_model(model, test_loader, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+def test_model(model,
+               test_loader,
+               device=torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')):
     model.eval()
     with torch.no_grad():
         test_count = 0
@@ -169,7 +173,6 @@ def info_dump(model_name,
               kernel4,
               pool_kernel,
               depth,
-              scale,
               hidden_dims=0,     # this is for the cnn-lstm
               training=True):
     if training:
@@ -195,7 +198,6 @@ def info_dump(model_name,
     print(f'        (Block 3) Conv1d Kernel Size:   {kernel4}')
     print(f'        Pool Kernel Size:               {pool_kernel}')
     print(f'        Depth:                          {depth}')
-    print(f'        Scale:                          {scale}')
 # =============================================================================
 # END OF info_dump()
 # =============================================================================
@@ -211,7 +213,8 @@ def objective(trial,
               y_valid,
               model_name='CNN',
               num_epochs=10,
-              device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+              time_bins=400,
+              device=torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')):
     # =========================================================================
     # START OF HYPERPARAMETER INITIALIZATION
     # =========================================================================
@@ -243,8 +246,6 @@ def objective(trial,
     ps_max = 5
     offset = 3
     depths = [25, 50, 100, 150, 200] # initial out_channels
-    scale_min = 2
-    scale_max = 5
     hidden_dimss = [16, 32, 64, 128, 256]
 
     # model hyperparameters
@@ -255,7 +256,6 @@ def objective(trial,
     kernel4 = trial.suggest_int('kernel4', ks_min, ks_max - offset)
     pool_kernel = trial.suggest_int('pool_kernel', ps_min, ps_max)
     depth = trial.suggest_categorical('depth', depths)
-    scale = trial.suggest_int('scale', scale_min, scale_max)
     hidden_dims = trial.suggest_categorical('hidden_dims', hidden_dimss)
     # =========================================================================
     # END OF HYPERPARAMETER INITIALIZATION
@@ -272,14 +272,10 @@ def objective(trial,
                         kernel3=kernel3,
                         kernel4=kernel4,
                         pool_kernel=pool_kernel,
-                        time_bins=400,
+                        time_bins=time_bins,
                         channels=22,
-                        depth=depth,
-                        scale=scale).to(device)
+                        depth=depth).to(device)
     elif model_name == 'CNNLSTM':
-        # TODO manually adjusting for now. need to change
-        depth = 22
-        scale = 2
         model = cnnlstm.CNNLSTM(num_classes=4,
                                 hidden_dims=hidden_dims,
                                 dropout=dropout,
@@ -288,10 +284,9 @@ def objective(trial,
                                 kernel3=kernel3,
                                 kernel4=kernel4,
                                 pool_kernel=pool_kernel,
-                                time_bins=400,
+                                time_bins=time_bins,
                                 channels=22,
-                                depth=depth,
-                                scale=scale).to(device)
+                                depth=depth).to(device)
     criterion = torch.nn.CrossEntropyLoss()
 
     # set optimizer. note: only rmsprop and sgd use momentum. i'm pretty sure
@@ -342,7 +337,6 @@ def objective(trial,
               kernel4=kernel4,
               pool_kernel=pool_kernel,
               depth=depth,
-              scale=scale,
               hidden_dims=hidden_dims,
               training=True)
 
@@ -371,6 +365,7 @@ def learn_hyperparameters(X_train,
                           y_valid,
                           model_name='CNN',
                           num_epochs=10,
+                          time_bins=400,
                           trials=100):
     if model_name == 'CNN':
         pruner = optuna.pruners.MedianPruner()
@@ -386,8 +381,9 @@ def learn_hyperparameters(X_train,
                                            y_train=y_train,
                                            X_valid=X_valid,
                                            y_valid=y_valid,
-                                           model_name=model_name,
-                                           num_epochs=num_epochs),
+                                           time_bins=time_bins,
+                                           num_epochs=num_epochs,
+                                           model_name=model_name),
                    n_trials=trials)
 
     params = study.best_trial.params
@@ -407,7 +403,6 @@ def learn_hyperparameters(X_train,
               kernel4=params.get('kernel4'),
               pool_kernel=params.get('pool_kernel'),
               depth=params.get('depth'),
-              scale=params.get('scale'),
               hidden_dims=params.get('hidden_dims'),
               training=False)
 

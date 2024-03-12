@@ -16,8 +16,7 @@ class CNNLSTM(nn.Module):
                  pool_kernel,
                  time_bins=400,
                  channels=22,
-                 depth=25,
-                 scale=2):
+                 depth=25):
         super(CNNLSTM, self).__init__()
 
         self.magic_number = time_bins + kernel3 - 1
@@ -48,10 +47,10 @@ class CNNLSTM(nn.Module):
 
         self.conv3 = nn.Sequential(
             nn.Conv1d(in_channels=depth,
-                      out_channels=depth * scale,
+                      out_channels=depth * 2,
                       kernel_size=kernel3),
             nn.ELU(),
-            nn.BatchNorm1d(depth * scale),
+            nn.BatchNorm1d(depth * 2),
             nn.MaxPool1d(kernel_size=pool_kernel),
             nn.Dropout(dropout)
         )
@@ -60,7 +59,7 @@ class CNNLSTM(nn.Module):
         self.L_pool = (self.L_pool - pool_kernel) // pool_kernel + 1
 
         self.conv4 = nn.Sequential(
-            nn.Conv1d(in_channels=depth * scale,
+            nn.Conv1d(in_channels=depth * 2,
                       out_channels=self.magic_number,
                       kernel_size=kernel4),
             nn.ReLU(),
