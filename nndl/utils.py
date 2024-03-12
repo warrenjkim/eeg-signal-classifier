@@ -6,7 +6,8 @@ import gc
 import collections
 from torchinfo import summary
 import nndl.models.CNN as cnn
-import nndl.models.CNNLSTM as cnnlstm
+import nndl.models.CNNLSTM as clstm
+import nndl.models.GRU as gru
 from torch.utils.data import TensorDataset, DataLoader, random_split
 import torchvision
 from torchvision.transforms import v2
@@ -90,8 +91,6 @@ def train_model(model,
         val_acc = val_correct_count / val_count
         val_accuracies.append(val_acc.item())
         scheduler.step(val_loss)
-        if cosine:
-            current_lr = scheduler.get_last_lr()[0]
         # ======================================================================
         # END OF VALIDATION
         # ======================================================================
@@ -167,10 +166,7 @@ def info_dump(model_name,
               weight_decay,
               momentum,        # this is only for sgd and rmsprop
               dropout,
-              kernel1,
-              kernel2,
-              kernel3,
-              kernel4,
+              kernel,
               pool_kernel,
               depth,
               hidden_dims=0,     # this is for the cnn-lstm
@@ -183,7 +179,7 @@ def info_dump(model_name,
         print('    ------------------------')
 
     print(f'    Batch Size:                         {batch_size}')
-    if model_name == 'CNNLSTM':
+    if model_name == 'CNNLSTM' or model_name == 'GRU':
         print(f'    Hidden Dimensions:                  {hidden_dims}')
     print(f'    Optimizer:                          {optimizer_name}')
     print(f'        Learning Rate:                  {learning_rate}')
@@ -192,10 +188,8 @@ def info_dump(model_name,
         print(f'        Momentum:                       {momentum}')
     print(f'    Model:                              {model_name}')
     print(f'        Dropout:                        {dropout}')
-    print(f'        (Block 1) Conv1d Kernel Size:   {kernel1}')
-    print(f'        (Block 1) Conv2d Kernel Size:   {kernel2}')
-    print(f'        (Block 2) Conv1d Kernel Size:   {kernel3}')
-    print(f'        (Block 3) Conv1d Kernel Size:   {kernel4}')
+    print(f'        (Block 1) Conv Kernel Size:     {kernel**2}')
+    print(f'        (Block 2-3) Conv Kernel Size:   {kernel}')
     print(f'        Pool Kernel Size:               {pool_kernel}')
     print(f'        Depth:                          {depth}')
 # =============================================================================
@@ -237,23 +231,18 @@ def objective(trial,
     weight_decay = trial.suggest_float('weight_decay', wd_min, wd_max, log=True)
     momentum = trial.suggest_float('momentum', mu_min, mu_max, log=True)  # only used for RMSprop and SGD
 
-    do_min = 0.4
+    do_min = 0.48
     do_max = 0.8
-    ks2 = ['(1, 17)', '(1, 22)','(1, 25)']
     ks_min = 2
-    ks_max = 10
+    ks_max = 7
     ps_min = 2
     ps_max = 5
-    offset = 3
-    depths = [25, 50, 100, 150, 200] # initial out_channels
-    hidden_dimss = [16, 32, 64, 128, 256]
+    hidden_dimss = [64, 128, 256]
+    depths = [16, 32, 64]
 
     # model hyperparameters
     dropout = trial.suggest_float('dropout', do_min, do_max)
-    kernel1 = trial.suggest_int('kernel1', ks_min, ks_max)
-    kernel2 = eval(trial.suggest_categorical('kernel2', ks2))
-    kernel3 = trial.suggest_int('kernel3', ks_min, ks_max - offset)
-    kernel4 = trial.suggest_int('kernel4', ks_min, ks_max - offset)
+    kernel = trial.suggest_int('kernel', ks_min, ks_max)
     pool_kernel = trial.suggest_int('pool_kernel', ps_min, ps_max)
     depth = trial.suggest_categorical('depth', depths)
     hidden_dims = trial.suggest_categorical('hidden_dims', hidden_dimss)
@@ -267,26 +256,26 @@ def objective(trial,
     if model_name == 'CNN':
         model = cnn.CNN(num_classes=4,
                         dropout=dropout,
-                        kernel1=kernel1,
-                        kernel2=kernel2,
-                        kernel3=kernel3,
-                        kernel4=kernel4,
+                        kernel=kernel,
                         pool_kernel=pool_kernel,
                         time_bins=time_bins,
-                        channels=22,
                         depth=depth).to(device)
     elif model_name == 'CNNLSTM':
-        model = cnnlstm.CNNLSTM(num_classes=4,
-                                hidden_dims=hidden_dims,
-                                dropout=dropout,
-                                kernel1=kernel1,
-                                kernel2=kernel2,
-                                kernel3=kernel3,
-                                kernel4=kernel4,
-                                pool_kernel=pool_kernel,
-                                time_bins=time_bins,
-                                channels=22,
-                                depth=depth).to(device)
+        model = clstm.CNNLSTM(num_classes=4,
+                              hidden_dims=hidden_dims,
+                              dropout=dropout,
+                              kernel=kernel,
+                              pool_kernel=pool_kernel,
+                              time_bins=time_bins,
+                              depth=depth).to(device)
+    elif model_name == 'GRU':
+        model = gru.GRU(num_classes=4,
+                        hidden_dims=hidden_dims,
+                        dropout=dropout,
+                        kernel=kernel,
+                        pool_kernel=pool_kernel,
+                        time_bins=time_bins,
+                        depth=depth).to(device)
     criterion = torch.nn.CrossEntropyLoss()
 
     # set optimizer. note: only rmsprop and sgd use momentum. i'm pretty sure
@@ -331,10 +320,7 @@ def objective(trial,
               weight_decay=weight_decay,
               momentum=momentum,
               dropout=dropout,
-              kernel1=kernel1,
-              kernel2=kernel2,
-              kernel3=kernel3,
-              kernel4=kernel4,
+              kernel=kernel,
               pool_kernel=pool_kernel,
               depth=depth,
               hidden_dims=hidden_dims,
@@ -367,10 +353,8 @@ def learn_hyperparameters(X_train,
                           num_epochs=10,
                           time_bins=400,
                           trials=100):
-    if model_name == 'CNN':
-        pruner = optuna.pruners.MedianPruner()
-    else:
-        pruner = optuna.pruners.ThresholdPruner(lower=0.28, n_warmup_steps=3)
+
+    pruner = optuna.pruners.MedianPruner()
 
     study = optuna.create_study(direction='maximize',
                                 sampler=optuna.samplers.TPESampler(),
@@ -397,10 +381,7 @@ def learn_hyperparameters(X_train,
               weight_decay=params.get('weight_decay'),
               momentum=params.get('momentum'),
               dropout=params.get('dropout'),
-              kernel1=params.get('kernel1'),
-              kernel2=params.get('kernel2'),
-              kernel3=params.get('kernel3'),
-              kernel4=params.get('kernel4'),
+              kernel=params.get('kernel'),
               pool_kernel=params.get('pool_kernel'),
               depth=params.get('depth'),
               hidden_dims=params.get('hidden_dims'),
