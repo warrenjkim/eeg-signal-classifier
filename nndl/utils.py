@@ -1,4 +1,4 @@
-# hours wasted: 2
+# hours wasted: too many
 
 import torch
 import optuna
@@ -178,20 +178,18 @@ def info_dump(model_name,
         print(f'    Learned Hyperparameters')
         print('    ------------------------')
 
-    print(f'    Batch Size:                         {batch_size}')
-    if model_name == 'CNNLSTM' or model_name == 'GRU':
-        print(f'    Hidden Dimensions:                  {hidden_dims}')
-    print(f'    Optimizer:                          {optimizer_name}')
-    print(f'        Learning Rate:                  {learning_rate}')
-    print(f'        Weight Decay:                   {weight_decay}')
+    print(f'    Batch Size:             {batch_size}')
+    print(f'    Hidden Dimensions:      {hidden_dims}')
+    print(f'    Optimizer:              {optimizer_name}')
+    print(f'        Learning Rate:      {learning_rate}')
+    print(f'        Weight Decay:       {weight_decay}')
     if optimizer_name == 'RMSprop' or optimizer_name == 'SGD':
-        print(f'        Momentum:                       {momentum}')
-    print(f'    Model:                              {model_name}')
-    print(f'        Dropout:                        {dropout}')
-    print(f'        (Block 1) Conv Kernel Size:     {kernel**2}')
-    print(f'        (Block 2-3) Conv Kernel Size:   {kernel}')
-    print(f'        Pool Kernel Size:               {pool_kernel}')
-    print(f'        Depth:                          {depth}')
+        print(f'        Momentum:           {momentum}')
+    print(f'    Model:                  {model_name}')
+    print(f'        Dropout:            {dropout}')
+    print(f'        Conv Kernel Size:   {kernel}')
+    print(f'        Pool Kernel Size:   {pool_kernel}')
+    print(f'        Depth:              {depth}')
 # =============================================================================
 # END OF info_dump()
 # =============================================================================
@@ -212,13 +210,13 @@ def objective(trial,
     # =========================================================================
     # START OF HYPERPARAMETER INITIALIZATION
     # =========================================================================
-    batch_sizes = [64, 128, 256]
+    batch_sizes = [256]
 
-    optimizers = ['Adamax', 'NAdam', 'Adam', 'RMSprop', 'SGD']
+    optimizers = ['NAdam', 'Adam', 'RMSprop', 'SGD']
     lr_min = 1e-4 # learning rate
     lr_max = 1e-2 # learning rate
     wd_min = 1e-6 # weight decay
-    wd_max = 1e-2 # weight decay
+    wd_max = 1e-4 # weight decay
     mu_min = 0.8  # momentum
     mu_max = 0.99 # momentum
 
@@ -231,14 +229,14 @@ def objective(trial,
     weight_decay = trial.suggest_float('weight_decay', wd_min, wd_max, log=True)
     momentum = trial.suggest_float('momentum', mu_min, mu_max, log=True)  # only used for RMSprop and SGD
 
-    do_min = 0.48
+    do_min = 0.5
     do_max = 0.8
-    ks_min = 2
-    ks_max = 7
+    ks_min = 5
+    ks_max = 10
     ps_min = 2
-    ps_max = 5
-    hidden_dimss = [64, 128, 256]
-    depths = [16, 32, 64]
+    ps_max = 4
+    hidden_dimss = [128, 256]
+    depths = [32, 64, 128]
 
     # model hyperparameters
     dropout = trial.suggest_float('dropout', do_min, do_max)
@@ -255,6 +253,7 @@ def objective(trial,
     # =========================================================================
     if model_name == 'CNN':
         model = cnn.CNN(num_classes=4,
+                        hidden_dims=hidden_dims,
                         dropout=dropout,
                         kernel=kernel,
                         pool_kernel=pool_kernel,
@@ -281,11 +280,7 @@ def objective(trial,
     # set optimizer. note: only rmsprop and sgd use momentum. i'm pretty sure
     # i need to adjust the adam family to have extra parameters.
     # TODO: check if (n)adam(ax) needs extra params
-    if optimizer_name == 'Adamax':
-        optimizer = torch.optim.Adamax(model.parameters(),
-                                       lr=learning_rate,
-                                       weight_decay=weight_decay)
-    elif optimizer_name == 'NAdam':
+    if optimizer_name == 'NAdam':
         optimizer = torch.optim.NAdam(model.parameters(),
                                       lr=learning_rate, weight_decay=weight_decay)
     elif optimizer_name == 'Adam':
@@ -354,7 +349,7 @@ def learn_hyperparameters(X_train,
                           time_bins=400,
                           trials=100):
 
-    pruner = optuna.pruners.MedianPruner()
+    pruner = optuna.pruners.ThresholdPruner(lower=0.3, n_warmup_steps=3)
 
     study = optuna.create_study(direction='maximize',
                                 sampler=optuna.samplers.TPESampler(),
