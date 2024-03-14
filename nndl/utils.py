@@ -90,7 +90,7 @@ def train_model(model,
 
         val_acc = val_correct_count / val_count
         val_accuracies.append(val_acc.item())
-        scheduler.step(val_loss)
+        scheduler.step()
         # ======================================================================
         # END OF VALIDATION
         # ======================================================================
@@ -165,11 +165,6 @@ def info_dump(model_name,
               learning_rate,
               weight_decay,
               momentum,        # this is only for sgd and rmsprop
-              dropout,
-              kernel,
-              pool_kernel,
-              depth,
-              hidden_dims=0,     # this is for the cnn-lstm
               training=True):
     if training:
         print(f'Training with the following hyperparameters:')
@@ -178,18 +173,13 @@ def info_dump(model_name,
         print(f'    Learned Hyperparameters')
         print('    ------------------------')
 
+    print(f'Model:                      {model_name}')
     print(f'    Batch Size:             {batch_size}')
-    print(f'    Hidden Dimensions:      {hidden_dims}')
     print(f'    Optimizer:              {optimizer_name}')
     print(f'        Learning Rate:      {learning_rate}')
     print(f'        Weight Decay:       {weight_decay}')
     if optimizer_name == 'RMSprop' or optimizer_name == 'SGD':
         print(f'        Momentum:           {momentum}')
-    print(f'    Model:                  {model_name}')
-    print(f'        Dropout:            {dropout}')
-    print(f'        Conv Kernel Size:   {kernel}')
-    print(f'        Pool Kernel Size:   {pool_kernel}')
-    print(f'        Depth:              {depth}')
 # =============================================================================
 # END OF info_dump()
 # =============================================================================
@@ -210,7 +200,7 @@ def objective(trial,
     # =========================================================================
     # START OF HYPERPARAMETER INITIALIZATION
     # =========================================================================
-    batch_sizes = [256]
+    batch_sizes = [128, 256]
 
     optimizers = ['NAdam', 'Adam', 'RMSprop', 'SGD']
     lr_min = 1e-4 # learning rate
@@ -228,22 +218,6 @@ def objective(trial,
     learning_rate = trial.suggest_float('learning_rate', lr_min, lr_max, log=True)
     weight_decay = trial.suggest_float('weight_decay', wd_min, wd_max, log=True)
     momentum = trial.suggest_float('momentum', mu_min, mu_max, log=True)  # only used for RMSprop and SGD
-
-    do_min = 0.5
-    do_max = 0.8
-    ks_min = 5
-    ks_max = 10
-    ps_min = 2
-    ps_max = 4
-    hidden_dimss = [128, 256]
-    depths = [32, 64, 128]
-
-    # model hyperparameters
-    dropout = trial.suggest_float('dropout', do_min, do_max)
-    kernel = trial.suggest_int('kernel', ks_min, ks_max)
-    pool_kernel = trial.suggest_int('pool_kernel', ps_min, ps_max)
-    depth = trial.suggest_categorical('depth', depths)
-    hidden_dims = trial.suggest_categorical('hidden_dims', hidden_dimss)
     # =========================================================================
     # END OF HYPERPARAMETER INITIALIZATION
     # =========================================================================
@@ -252,29 +226,11 @@ def objective(trial,
     # START OF MODEL INITIALIZATION
     # =========================================================================
     if model_name == 'CNN':
-        model = cnn.CNN(num_classes=4,
-                        hidden_dims=hidden_dims,
-                        dropout=dropout,
-                        kernel=kernel,
-                        pool_kernel=pool_kernel,
-                        time_bins=time_bins,
-                        depth=depth).to(device)
+        model = cnn.CNN().to(device)
     elif model_name == 'CNNLSTM':
-        model = clstm.CNNLSTM(num_classes=4,
-                              hidden_dims=hidden_dims,
-                              dropout=dropout,
-                              kernel=kernel,
-                              pool_kernel=pool_kernel,
-                              time_bins=time_bins,
-                              depth=depth).to(device)
+        model = clstm.CNNLSTM().to(device)
     elif model_name == 'GRU':
-        model = gru.GRU(num_classes=4,
-                        hidden_dims=hidden_dims,
-                        dropout=dropout,
-                        kernel=kernel,
-                        pool_kernel=pool_kernel,
-                        time_bins=time_bins,
-                        depth=depth).to(device)
+        model = gru.GRU().to(device)
     criterion = torch.nn.CrossEntropyLoss()
 
     # set optimizer. note: only rmsprop and sgd use momentum. i'm pretty sure
@@ -314,11 +270,6 @@ def objective(trial,
               learning_rate=learning_rate,
               weight_decay=weight_decay,
               momentum=momentum,
-              dropout=dropout,
-              kernel=kernel,
-              pool_kernel=pool_kernel,
-              depth=depth,
-              hidden_dims=hidden_dims,
               training=True)
 
     _, val_accuracies = train_model(model=model,
