@@ -1,0 +1,8 @@
+\begin{thebibliography}{1}\itemsep=-1pt
+
+\bibitem{Alpher05}
+FirstName Alpher and FirstName Gamow.
+\newblock Can a computer frobnicate?
+\newblock In {\em CVPR}, pages 234--778, 2005.
+
+\end{thebibliography}
