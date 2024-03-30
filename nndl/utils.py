@@ -1,17 +1,18 @@
 # hours wasted: too many
 
+import gc
+import copy
 import torch
 import optuna
-import gc
 import collections
-from torchinfo import summary
-import nndl.models.CNN as cnn
-import nndl.models.CNNLSTM as clstm
-import nndl.models.GRU as gru
-from torch.utils.data import TensorDataset, DataLoader, random_split
 import torchvision
-from torchvision.transforms import v2
+from torchinfo import summary
 from tqdm.notebook import tqdm
+
+
+from torchvision.transforms import v2
+from torch.utils.data import random_split
+from torch.utils.data import TensorDataset, DataLoader
 
 # ==============================================================================
 # START OF train_model()
@@ -29,7 +30,10 @@ def train_model(model,
                 trial=None):
     # we return these
     train_accuracies = []
+    train_losses = []
+
     val_accuracies = []
+    val_losses = []
 
     for epoch in range(num_epochs):
         print(f'Epoch {epoch + 1}')
@@ -40,6 +44,7 @@ def train_model(model,
         model.train()
         train_count = 0
         train_correct_count = 0
+        train_loss = 0
 
         # minibatch
         for batch_idx, (train_x, train_y) in enumerate(tqdm(train_loader)):
@@ -48,6 +53,7 @@ def train_model(model,
 
             logits = model(train_x)
             loss = criterion(logits, train_y)
+            train_loss += loss.item() * train_x.size(0)
 
             optimizer.zero_grad()   # no gradient accumulation between batches
             loss.backward()         # backprop
@@ -61,6 +67,7 @@ def train_model(model,
 
         train_acc = train_correct_count / train_count
         train_accuracies.append(train_acc.item())
+        train_losses.append(train_loss / train_count)
         # ======================================================================
         # END OF TRAINING
         # ======================================================================
@@ -81,24 +88,26 @@ def train_model(model,
 
                 logits = model(val_x).detach()
                 y_hat = torch.argmax(logits, dim=-1)
+                val_loss += criterion(logits, val_y).item() * val_x.size(0)
 
                 val_correct_count += torch.sum(y_hat == val_y, axis=-1)
                 val_count += val_y.size(0)
 
                 # for the learning rate scheduler
-                val_loss = criterion(logits, val_y)
 
         val_acc = val_correct_count / val_count
         val_accuracies.append(val_acc.item())
+        val_losses.append(val_loss / val_count)
         scheduler.step()
         # ======================================================================
         # END OF VALIDATION
         # ======================================================================
 
         # performance info
-        print('Train acc: {:.3f}, Val acc: {:.3f}, Val loss: {:.3f}'.format(train_acc,
-                                                                            val_acc,
-                                                                            val_loss))
+        print('Train acc: {:.3f}, Train loss: {:.3f}\nVal acc: {:.3f}, Val loss: {:.3f}\n'.format(train_acc,
+                                                                                                train_loss / train_count,
+                                                                                                val_acc,
+                                                                                                val_loss / val_count))
 
         if learning:
             # ======================================================================
@@ -122,7 +131,7 @@ def train_model(model,
         torch.cuda.empty_cache()
         gc.collect()
 
-    return train_accuracies, val_accuracies
+    return train_accuracies, train_losses, val_accuracies, val_losses
 # ==============================================================================
 # END OF train_model()
 # ==============================================================================
@@ -336,4 +345,104 @@ def learn_hyperparameters(X_train,
     return params
 # ==============================================================================
 # END OF learn_hyperparameters()
+# ==============================================================================
+
+
+# ==============================================================================
+# START OF data_prep()
+# ==============================================================================
+def data_prep(X,
+              y,
+              sub_sample=2,
+              average=2,
+              noise=True,
+              p_channel_dropout=0,
+              smooth_time_mask=False,
+              mask_size=0,
+              time_shift=0,
+              clipping_max=800,
+              noise_stdev=0):
+
+    total_X = None
+    total_y = None
+
+    X = X[:,:,0:clipping_max]
+    print('Shape of X after trimming: {X.shape}')
+
+    X_max, _ = torch.max(X.view(X.size(0), X.size(1), -1, sub_sample), axis=3)
+    total_X = X_max
+    total_y = y
+    print('Shape of X after maxpooling:',total_X.shape)
+
+    X_average = torch.mean(X.view(X.size(0), X.size(1), -1, average), axis=3)
+    X_average = X_average + torch.normal(0.0, noise_stdev, X_average.shape)
+
+    total_X = torch.cat((total_X, X_average), dim=0)
+    total_y = torch.cat((total_y, y))
+    print('Shape of X after averaging+noise and concatenating:',total_X.shape)
+
+    for i in range(sub_sample):
+        X_subsample = X[:, :, i::sub_sample] + \
+            (torch.normal(0.0, 0.5, X[:, :,i::sub_sample].shape) if noise else 0.0)
+        total_X = torch.cat((total_X, X_subsample), dim=0)
+        print(total_y.view(-1,1).shape)
+        print(y.view(-1,1).shape)
+        total_y = torch.cat((total_y, y))
+
+    print('Shape of X after subsampling and concatenating:',total_X.shape)
+    print('Shape of Y:',total_y.shape)
+
+    if p_channel_dropout != 0:
+        mask = (torch.rand(total_X.shape[0], total_X.shape[1]) >= p_channel_dropout).unsqueeze(2)
+        X_dropout = mask * total_X
+        total_X = torch.cat((total_X, X_dropout))
+        total_y = torch.cat((total_y, total_y))
+
+        print(f'Shape of X after channel dropout {total_X.shape}')
+        print(f'Shape of Y: {total_y.shape}')
+
+    if smooth_time_mask:
+        copy_X = copy.deepcopy(total_X)
+        starts = ((torch.rand(copy_X.shape[0])*(copy_X.shape[2]-mask_size-1))).round()
+        for idx, m in enumerate(copy_X):
+            start = int(starts[idx])
+            end = start+mask_size
+            m[:,start:end] = 0
+        total_X = torch.cat((total_X, copy_X))
+        total_y = torch.cat((total_y, total_y))
+
+        print(f'Shape of X after smooth time mask {total_X.shape}')
+        print(f'Shape of Y: {total_y.shape}')
+
+    if time_shift != 0:
+        time_shift_X = copy.deepcopy(total_X)
+        shifts = np.random.randint(low=-time_shift, high=time_shift+1, size=(total_X.shape[0],))
+        time_shift_X = torch.Tensor(np.array([torch.roll(elem, shift, 1) for elem, shift in zip(time_shift_X, shifts)]))
+        total_X = torch.cat((total_X, time_shift_X))
+        total_y = torch.cat((total_y, total_y))
+
+        print(f'Shape of X after time_shift {total_X.shape}')
+        print(f'Shape of Y: {total_y.shape}')
+
+    return total_X,total_y
+# ==============================================================================
+# END OF data_prep()
+# ==============================================================================
+
+
+# ==============================================================================
+# START OF test_data_prep()
+# ==============================================================================
+def test_data_prep(X,
+                   sub_sample=2,
+                   clipping_max=800):
+    total_X = None
+    X = X[:,:,0:clipping_max]
+    print('Shape of X after trimming:', X.shape)
+    X_max, _ = torch.max(X.view(X.size(0), X.size(1), -1, sub_sample), axis=3)
+    total_X = X_max
+    print('Shape of X after maxpooling:',total_X.shape)
+    return total_X
+# ==============================================================================
+# END OF test_data_prep()
 # ==============================================================================
